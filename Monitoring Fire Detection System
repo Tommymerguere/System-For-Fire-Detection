@@ -1,0 +1,108 @@
+#include <DHT.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+
+// === Konfigurasi Blynk dan WiFi ===
+char auth[] = "ISI_DENGAN_AUTH_TOKEN_BLYNK";
+char ssid[] = "NAMA_WIFI";
+char pass[] = "PASSWORD_WIFI";
+
+// === Pin ===
+#define DHTPIN D4
+#define DHTTYPE DHT11
+#define FLAME_PIN A0
+#define BUZZER_PIN D1
+#define RELAY_PIN D2
+
+// === Inisialisasi objek ===
+DHT dht(DHTPIN, DHTTYPE);
+LiquidCrystal_I2C lcd(0x27, 16, 2); // Ganti 0x3F jika tidak tampil
+
+// === Thresholds ===
+const float batasSuhu = 50.0;
+const int batasFlame = 512;
+const int batasKelembaban = 30;
+
+void setup() {
+  Blynk.begin(auth, ssid, pass);
+  Serial.begin(9600);
+  dht.begin();
+
+  pinMode(FLAME_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(RELAY_PIN, LOW);
+
+  lcd.begin();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("Sistem Kebakaran");
+  delay(2000);
+  lcd.clear();
+}
+
+void loop() {
+  Blynk.run();
+
+  float suhu = dht.readTemperature();
+  float kelembaban = dht.readHumidity();
+  int flame = analogRead(FLAME_PIN);
+  bool fireDetected = flame < batasFlame;
+
+  // Output ke Serial
+  if (!isnan(suhu) && !isnan(kelembaban)) {
+    Serial.print("Suhu: ");
+    Serial.print(suhu);
+    Serial.print(" C | Kelembaban: ");
+    Serial.print(kelembaban);
+    Serial.println(" %");
+  } else {
+    Serial.println("Sensor DHT error!");
+  }
+
+  Serial.print("Flame: ");
+  Serial.print(flame);
+  Serial.print(" => ");
+  Serial.println(fireDetected ? "API TERDETEKSI!" : "Aman");
+
+  // Reset awal
+  digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(RELAY_PIN, LOW);
+  String status = "AMAN";
+
+  // Logika kebakaran
+  if (suhu >= batasSuhu || fireDetected) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    digitalWrite(RELAY_PIN, HIGH);
+    status = "BAHAYA!";
+  } else if (kelembaban < batasKelembaban || suhu >= 35) {
+    digitalWrite(BUZZER_PIN, HIGH);
+    status = "Kelembaban Rendah";
+  }
+
+  // LCD Tampilan 1
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Suhu: "); lcd.print(suhu); lcd.print(" C");
+  lcd.setCursor(0, 1);
+  lcd.print("Hum: "); lcd.print(kelembaban); lcd.print(" %");
+  delay(2000);
+
+  // LCD Tampilan 2
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Api: "); lcd.print(flame);
+  lcd.setCursor(0, 1);
+  lcd.print("Status: "); lcd.print(status);
+  delay(2000);
+
+  // Kirim ke Blynk
+  Blynk.virtualWrite(V0, suhu);
+  Blynk.virtualWrite(V1, kelembaban);
+  Blynk.virtualWrite(V3, flame);
+  Blynk.virtualWrite(V4, status);
+}
